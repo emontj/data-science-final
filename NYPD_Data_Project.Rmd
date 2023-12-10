@@ -1,0 +1,119 @@
+---
+title: "NYPD Data Project"
+author: ""
+date: "2023-11-22"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+
+# Introduction
+This is for the MSDS at CU assignment in the Data Science as a Field course.  I left all code displayed to help illustrate what I did and to demonstrate my thought process, even if the document would be aesthetically better off otherwise.
+
+# Primary Question
+What trends exist between victims who are male and boroughs/precincts?
+
+# Project Setup
+After downloading the data from https://catalog.data.gov/dataset/nypd-shooting-incident-data-historic, it was imported with:
+```{r project_setup}
+raw_shooting_data = read_csv("./NYPD_Shooting_Incident_Data__Historic_.csv")
+```
+The raw data shown as above.  Note that this command assumes the CSV is in the same folder as the Rmd script.
+
+# Summary of Data
+As we can see in the summary, the data contains information about perpetrators and victims, such as age, sex, and race.
+It also contains data as to when and where the shooting occurred.
+The data contains some incomplete columns, such as the location description.
+```{r summary}
+summary(raw_shooting_data)
+```
+
+# Data Cleanup
+Since the victim age group "1022" is ambiguous and few in number, it will be excluded from this report.
+```{r cleanup}
+age_group_data_filtered = raw_shooting_data %>%
+                    filter(VIC_AGE_GROUP != "1022")
+```
+
+# Notable Visualizations
+```{r visual}
+age_group_counts <- age_group_data_filtered %>% 
+                    group_by(VIC_AGE_GROUP) %>% 
+                    summarise(Count = n())
+
+ggplot(age_group_counts, aes(x = VIC_AGE_GROUP, y = Count)) + 
+    geom_bar(stat = "identity", fill = "steelblue") +
+    theme_minimal() +
+    labs(title = "Number of Victims in Each Age Group", 
+         x = "Age Group", 
+         y = "Number of Shootings")
+
+burrow_counts <- raw_shooting_data %>% 
+                    group_by(BORO) %>% 
+                    summarise(Count = n())
+
+ggplot(burrow_counts, aes(x = "", y = Count, fill = BORO)) +
+    geom_bar(width = 1, stat = "identity") +
+    coord_polar(theta = "y") +
+    theme_void() +
+    labs(title = "Share of Shootings in Each Borough",
+         fill = "Borough")
+```
+These charts demonstrate some different queries, as well as some different colors and themes that could be applied.
+
+# Data Analysis
+Next, we will analyze shootings by precinct and sex (how many shootings of each sex (victims), in each precinct):
+```{r analysis}
+precinct_sex_counts <- raw_shooting_data %>%
+                       group_by(PRECINCT, VIC_SEX) %>%
+                       summarise(Count = n(), .groups = "drop")
+
+# Now format it cleaner
+better_format <- precinct_sex_counts %>%
+                pivot_wider(names_from = VIC_SEX, values_from = Count, values_fill = list(Count = 0))
+
+options(tibble.print_max = Inf) # Since we have 77 rows, we need to 
+print(better_format)
+options(tibble.print_max = 10) # Setting the limit back to default... just in case.
+```
+... and yes, that would've been better as a visualization.
+It is clear that some precincts have less shootings than others, and males are the victim more often in general.
+Some precincts, like precinct 22, have barely any shootings.  Others have thousands. 
+
+# Notable Model
+Inspired by the last analysis, we will build a model.  For simplicity, we are going to look just at male victim shootings by precinct, and drop females out of the model.  We will be looking to prove (fictional) claims that higher number precincts are more dangerous.
+
+```{r model}
+male_shootings <- raw_shooting_data %>%
+                filter(VIC_SEX == "M") %>%
+                group_by(PRECINCT) %>%
+                summarise(MaleShootings = n(), .groups = "drop")
+
+model <- glm(MaleShootings ~ PRECINCT, data = male_shootings, family = poisson)
+male_shootings$PredictedCounts <- predict(model, type = "response")
+
+ggplot(male_shootings, aes(x = PRECINCT, y = MaleShootings)) +
+    geom_point() +
+    geom_line(aes(y = PredictedCounts), color = "red") +
+    theme_minimal() +
+    labs(title = "Male Shootings in Each Precinct",
+         x = "Precinct",
+         y = "Count of Male Victim Shootings")
+```
+In this case, our model actually suggests that as your precinct number goes up, so do your shootings (slightly).  This is, likely not true in reality, and a great case of how poor data analysis can lead to false claims.
+Truthfully, since the slope is pretty linear, I'd say this actually suggests that there is no trend between precinct number and number of shootings.
+
+
+# Potential Bias in the Data
+I will explain one bias I suspect is in the data, and then a bias I think I may have.
+A bias I think might be in the data is that police officers may mis-report shooters or victims race.  They may do this intentionally if they are racially biased, and they may do this by accident if they do not get a good look at the shooter or victim (e.g. the shooter escapes before the police can get a look at who they are).
+A bias I have is that I am expecting police to file a report without due diligence, and therefore expecting the data to be inaccurate in some way.
+
+# Conclusion
+This project went over some data cleaning, visualizations, analysis and a model construction.  It also explored bias, and how data models aren't always best taken at face value.
